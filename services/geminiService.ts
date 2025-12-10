@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { GeminiResponse, AnalysisResult, SpectralDataset } from "../types";
 
 // Initialize Gemini Client
@@ -61,7 +61,7 @@ export const fetchSpectralData = async (query: string): Promise<GeminiResponse> 
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        thinkingConfig: { thinkingBudget: 2048 }, // Increased budget for processing larger datasets
+        thinkingConfig: { thinkingBudget: 2048 }, 
       }
     });
 
@@ -91,15 +91,31 @@ export const analyzeSpectra = async (datasets: SpectralDataset[]): Promise<Analy
   const names = datasets.map(d => d.name).join(", ");
   const context = datasets.map(d => `
     Object: ${d.name} (${d.type})
-    Range: ${d.data[0]?.wavelength.toFixed(2)} - ${d.data[d.data.length-1]?.wavelength.toFixed(2)} um
+    Range: ${d.data[0]?.wavelength.toFixed(3)} - ${d.data[d.data.length-1]?.wavelength.toFixed(3)} um
   `).join("\n");
 
   const prompt = `
-    Comparative spectral analysis for: ${names}.
+    Detailed spectral analysis for: ${names}.
     Context: ${context}
     
-    Identify features, discuss chemistry/physics.
-    Return JSON: { "summary": "...", "features": [{ "wavelength": 1.1, "species": "H2O", "description": "..." }] }
+    Task: Identify major spectral features/lines and their PHYSICAL ORIGIN.
+    For molecules, identify specific vibrational modes (e.g. "C-H stretch") and electronic transitions (e.g. "HOMO-LUMO", "Pi-Pi*") if in UV-Vis range.
+    
+    Output JSON Format:
+    { 
+      "summary": "Detailed paragraph summary explaining the spectrum...", 
+      "features": [
+        { 
+          "wavelength": 3.3, 
+          "species": "Methane", 
+          "description": "C-H Asymmetric Stretch",
+          "transition": "v3 stretch" or "Pi -> Pi*", // CRITICAL: Include transition shorthand if known
+          "type": "stretch", // options: 'stretch', 'bend', 'rock', 'wag', 'twist', 'scissoring', 'electronic'
+          "activeBonds": ["C-H"], 
+          "intensity": "strong"
+        }
+      ] 
+    }
   `;
 
   try {
@@ -110,6 +126,7 @@ export const analyzeSpectra = async (datasets: SpectralDataset[]): Promise<Analy
     });
     return cleanAndParseJSON(response.text || "{}") as AnalysisResult;
   } catch (error) {
+    console.error("Analysis Error:", error);
     return null;
   }
 };

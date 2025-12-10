@@ -11,7 +11,7 @@ import {
   ReferenceLine,
   Label
 } from 'recharts';
-import { SpectralDataset, AnalysisResult, Annotation, ViewMode } from '../types';
+import { SpectralDataset, AnalysisResult, Annotation, ViewMode, YAxisMode, SpectralFeature } from '../types';
 
 interface SpectralChartProps {
   datasets: SpectralDataset[];
@@ -20,28 +20,36 @@ interface SpectralChartProps {
   isNormalized: boolean;
   onPlotClick: (wavelength: number) => void;
   viewMode: ViewMode;
+  yAxisMode: YAxisMode;
+  onHover?: (wavelength: number | null) => void;
+  spectralLines?: SpectralFeature[]; 
 }
 
-const CustomTooltip = ({ active, payload, label, isNormalized, viewMode }: any) => {
+const CustomTooltip = ({ active, payload, label, isNormalized, viewMode, yAxisMode }: any) => {
   if (active && payload && payload.length) {
-    const xVal = Number(label);
+    const xVal = label;
     
-    // Calculate values based on view mode
-    let wavelength, wavenumber;
+    let wavelength, wavenumber, nanometers;
     if (viewMode === 'wavenumber') {
         wavenumber = xVal;
-        wavelength = 10000 / xVal;
+        wavelength = xVal > 0 ? 10000 / xVal : 0;
+        nanometers = wavelength * 1000;
+    } else if (viewMode === 'nanometers') {
+        nanometers = xVal;
+        wavelength = xVal / 1000;
+        wavenumber = wavelength > 0 ? 10000 / wavelength : 0;
     } else {
         wavelength = xVal;
-        wavenumber = 10000 / xVal;
+        nanometers = xVal * 1000;
+        wavenumber = xVal > 0 ? 10000 / xVal : 0;
     }
 
     return (
-      <div className="bg-space-800 border border-space-700 p-3 rounded shadow-xl bg-opacity-95 backdrop-blur-sm z-50">
+      <div className="bg-space-900 border border-space-700 p-3 rounded shadow-xl bg-opacity-95 z-50">
         <div className="flex justify-between items-baseline gap-4 mb-2 border-b border-space-700 pb-2">
            <div>
              <span className="text-[10px] text-gray-500 uppercase block">Wavelength</span>
-             <span className="text-gray-200 font-mono text-sm">{wavelength.toFixed(4)} µm</span>
+             <span className="text-gray-200 font-mono text-sm">{wavelength.toFixed(4)} µm / {nanometers.toFixed(1)} nm</span>
            </div>
            <div className="text-right">
              <span className="text-[10px] text-gray-500 uppercase block">Wavenumber</span>
@@ -49,15 +57,22 @@ const CustomTooltip = ({ active, payload, label, isNormalized, viewMode }: any) 
            </div>
         </div>
         
-        {payload.map((entry: any, index: number) => (
-          <div key={index} className="flex items-center gap-2 text-xs mb-1">
-            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }}></span>
-            <span className="text-gray-200 font-medium truncate max-w-[120px]" title={entry.name}>{entry.name}:</span>
-            <span className="font-mono text-white ml-auto">
-              {Number(entry.value).toFixed(4)}
-            </span>
-          </div>
-        ))}
+        {payload.map((entry: any, index: number) => {
+          // If it's a dataset line
+          if (entry.dataKey) {
+            return (
+              <div key={index} className="flex items-center gap-2 text-xs mb-1">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }}></span>
+                <span className="text-gray-200 font-medium truncate max-w-[120px]" title={entry.name}>{entry.name}:</span>
+                <span className="font-mono text-white ml-auto">
+                  {Number(entry.value).toFixed(4)}
+                  {yAxisMode === 'transmittance' && !isNormalized ? '%' : ''}
+                </span>
+              </div>
+            );
+          }
+          return null;
+        })}
       </div>
     );
   }
@@ -70,11 +85,15 @@ const SpectralChart: React.FC<SpectralChartProps> = ({
   annotations, 
   isNormalized,
   onPlotClick,
-  viewMode
+  viewMode,
+  yAxisMode,
+  onHover,
+  spectralLines 
 }) => {
-  const visibleDatasets = datasets.filter(d => d.isVisible);
-  
-  if (visibleDatasets.length === 0) {
+  const visibleDatasets = datasets.filter(d => d.isVisible && d.type !== 'Line'); 
+  const lineDatasets = datasets.filter(d => d.type === 'Line' && d.isVisible);
+
+  if (visibleDatasets.length === 0 && lineDatasets.length === 0) {
     return (
       <div className="h-full w-full flex items-center justify-center text-space-700 select-none bg-space-900/50 rounded-lg border border-space-800 border-dashed">
         <div className="text-center">
@@ -85,7 +104,7 @@ const SpectralChart: React.FC<SpectralChartProps> = ({
     );
   }
 
-  // Helper to get max intensity for normalization
+  // Normalize Logic
   const maxValues: Record<string, number> = {};
   if (isNormalized) {
     visibleDatasets.forEach(d => {
@@ -93,147 +112,153 @@ const SpectralChart: React.FC<SpectralChartProps> = ({
     });
   }
 
-  // 1. Gather all unique X points (either Wavelength or Wavenumber)
+  // Domain Calculation
   const allX = new Set<number>();
-  visibleDatasets.forEach(d => {
-    d.data.forEach(p => {
-        if (viewMode === 'wavenumber') {
-            // Convert micron to cm-1
-            if (p.wavelength > 0) allX.add(10000 / p.wavelength);
-        } else {
-            allX.add(p.wavelength);
-        }
-    });
-  });
-
-  // 2. Sort Logic
-  // Wavenumber view usually goes High -> Low (reversed), but Recharts handles domain reversal via `domain`.
-  // We sort ascending here for the data structure, then flip domain in Axis prop.
-  const sortedX = Array.from(allX).sort((a, b) => a - b);
-
-  // 3. Construct Chart Data
-  const chartData = sortedX.map(xVal => {
-    const point: any = { x: xVal };
-    
-    // Calculate the 'other' unit for the secondary axis tick formatter
-    // if xVal is Wavelength(um), other is Wavenumber(cm-1)
-    // if xVal is Wavenumber(cm-1), other is Wavelength(um)
-    const otherVal = xVal > 0 ? 10000 / xVal : 0;
-    point.otherX = otherVal;
-
-    visibleDatasets.forEach(d => {
-      // We need to find the data point matching 'xVal'.
-      // Convert xVal back to Wavelength to search in the dataset (which stores microns)
-      const targetWavelength = viewMode === 'wavenumber' ? (10000 / xVal) : xVal;
-      
-      // Look for match within tolerance
-      const tolerance = viewMode === 'wavenumber' ? 1.0 : 0.001; // cm-1 is larger scale
-      const match = d.data.find(p => Math.abs(p.wavelength - targetWavelength) < tolerance);
-      
-      if (match) {
-        point[d.id] = isNormalized ? match.intensity / maxValues[d.id] : match.intensity;
+  
+  const getX = (wavelengthMicrons: number) => {
+      if (viewMode === 'wavenumber') {
+          return wavelengthMicrons > 0 ? 10000 / wavelengthMicrons : 0;
       }
-    });
-    return point;
+      if (viewMode === 'nanometers') {
+          return wavelengthMicrons * 1000;
+      }
+      return wavelengthMicrons;
+  }
+
+  visibleDatasets.forEach(d => {
+    d.data.forEach(p => allX.add(getX(p.wavelength)));
   });
 
-  const handleChartClick = (e: any) => {
-    if (e && e.activeLabel) {
-       // activeLabel is in the current viewMode units.
-       const val = Number(e.activeLabel);
-       // Annotations are stored in Microns. Convert if needed.
-       const wavelength = viewMode === 'wavenumber' ? 10000 / val : val;
-       onPlotClick(wavelength);
-    }
-  };
+  lineDatasets.forEach(d => {
+      d.data.forEach(p => allX.add(getX(p.wavelength)));
+  });
+
+  const sortedX = Array.from(allX).sort((a, b) => a - b);
+  
+  let chartData: any[] = [];
+  
+  if (visibleDatasets.length > 0 || lineDatasets.length > 0) {
+      chartData = sortedX.map(xVal => {
+        const point: any = { x: xVal };
+        const currentWavelength = viewMode === 'wavenumber' 
+            ? (10000 / xVal) 
+            : (viewMode === 'nanometers' ? xVal / 1000 : xVal);
+
+        visibleDatasets.forEach(d => {
+           // Tolerance adjustments based on units
+           let tolerance = 0.005; // microns default
+           if (viewMode === 'wavenumber') tolerance = 1.0;
+           if (viewMode === 'nanometers') tolerance = 1.0; // 1 nm
+
+           const match = d.data.find(p => {
+               if (viewMode === 'wavenumber') return Math.abs((10000/p.wavelength) - xVal) < tolerance;
+               if (viewMode === 'nanometers') return Math.abs((p.wavelength * 1000) - xVal) < tolerance;
+               return Math.abs(p.wavelength - currentWavelength) < tolerance;
+           });
+           
+           if (match) {
+            let val = match.intensity;
+            if (yAxisMode === 'transmittance') {
+                val = Math.pow(10, -val);
+                if (!isNormalized) val = val * 100; 
+            }
+            if (isNormalized && yAxisMode !== 'transmittance') {
+                 val = val / maxValues[d.id];
+            }
+            point[d.id] = val;
+          }
+        });
+        return point;
+      });
+  }
+
+  const getAxisLabel = () => {
+      switch(viewMode) {
+          case 'wavenumber': return "Wavenumber (cm⁻¹)";
+          case 'nanometers': return "Wavelength (nm)";
+          default: return "Wavelength (µm)";
+      }
+  }
 
   return (
-    <div className="w-full h-full p-4 bg-space-900 rounded-lg border border-space-800 relative shadow-inner">
-      <div className="absolute top-4 left-14 z-10 pointer-events-none bg-space-900/80 px-2 py-1 rounded backdrop-blur-sm border border-space-800">
-         <h3 className="text-xs font-mono text-gray-400 uppercase tracking-widest flex items-center gap-2">
-          {viewMode === 'wavenumber' ? 'IR MODE' : 'STANDARD MODE'}
-          <span className="text-space-700">|</span>
-          <span className={isNormalized ? 'text-accent-cyan' : 'text-gray-500'}>
-             {isNormalized ? 'NORM (0-1)' : 'ABS FLUX'}
-          </span>
+    <div className="w-full h-full p-2 bg-space-900 rounded-lg border border-space-800 relative shadow-inner flex flex-col">
+      <div className="absolute top-4 right-14 z-10 pointer-events-none text-right">
+         <h3 className="text-[10px] font-mono text-gray-500 uppercase tracking-widest bg-space-950/80 px-2 py-1 rounded border border-space-800 inline-block">
+          {getAxisLabel()}
         </h3>
       </div>
       
+      <div className="flex-1 min-h-0 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart 
           data={chartData} 
-          margin={{ top: 30, right: 30, left: 20, bottom: 30 }}
-          onClick={handleChartClick}
+          margin={{ top: 20, right: 30, left: 10, bottom: 20 }}
+          onClick={(e: any) => {
+              if (e && e.activeLabel) {
+                  const x = Number(e.activeLabel);
+                  let wl = x;
+                  if (viewMode === 'wavenumber') wl = 10000 / x;
+                  if (viewMode === 'nanometers') wl = x / 1000;
+                  onPlotClick(wl);
+              }
+          }}
+          onMouseMove={(e: any) => {
+              if (onHover && e && e.activeLabel) {
+                  const x = Number(e.activeLabel);
+                  let wl = x;
+                  if (viewMode === 'wavenumber') wl = 10000 / x;
+                  if (viewMode === 'nanometers') wl = x / 1000;
+                  onHover(wl);
+              }
+          }}
+          onMouseLeave={() => onHover && onHover(null)}
         >
-          <CartesianGrid stroke="#2a2d4a" strokeDasharray="3 3" opacity={0.3} />
+          <CartesianGrid stroke="#2a2d4a" strokeDasharray="3 3" opacity={0.3} vertical={false} />
           
-          {/* PRIMARY X-AXIS (BOTTOM) */}
           <XAxis 
-            xAxisId="primary"
             dataKey="x" 
             type="number" 
-            // If IR Mode (Wavenumber), standard is High -> Low. 
-            // If Standard (Wavelength), Low -> High.
-            domain={viewMode === 'wavenumber' ? ['dataMax', 'dataMin'] : ['dataMin', 'dataMax']} 
+            domain={['dataMin', 'dataMax']} 
             tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'JetBrains Mono' }}
-            tickFormatter={(val) => val.toFixed(viewMode === 'wavenumber' ? 0 : 2)}
+            tickFormatter={(val) => val.toFixed(viewMode === 'microns' ? 2 : 0)}
             height={40}
-            interval="preserveStartEnd"
+            minTickGap={30}
+            reversed={viewMode === 'wavenumber'}
           >
              <Label 
-               value={viewMode === 'wavenumber' ? "Wavenumber (cm⁻¹)" : "Wavelength (µm)"} 
-               offset={0} 
-               position="insideBottom" 
-               fill="#94a3b8" 
-               fontSize={12} 
+                value={getAxisLabel()} 
+                offset={0} 
+                position="insideBottom" 
+                fill="#94a3b8" 
+                fontSize={12} 
              />
-          </XAxis>
-
-          {/* SECONDARY X-AXIS (TOP) */}
-          <XAxis 
-            xAxisId="secondary"
-            orientation="top"
-            dataKey="x" // We use the same 'x' data key but formatted differently
-            type="number"
-            domain={viewMode === 'wavenumber' ? ['dataMax', 'dataMin'] : ['dataMin', 'dataMax']} 
-            tick={{ fill: '#00f0ff', fontSize: 10, fontFamily: 'JetBrains Mono', opacity: 0.6 }}
-            tickFormatter={(val) => {
-                const other = val > 0 ? 10000 / val : 0;
-                return other.toFixed(viewMode === 'wavenumber' ? 2 : 0);
-            }}
-            height={40}
-            stroke="#00f0ff33"
-            interval="preserveStartEnd"
-          >
-            <Label 
-               value={viewMode === 'wavenumber' ? "Wavelength (µm)" : "Wavenumber (cm⁻¹)"} 
-               offset={0} 
-               position="insideTop" 
-               fill="#00f0ff" 
-               fontSize={11} 
-               opacity={0.6} 
-            />
           </XAxis>
 
           <YAxis 
             tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'JetBrains Mono' }}
-            domain={isNormalized ? [0, 1.05] : ['auto', 'auto']}
+            domain={['auto', 'auto']}
+            width={40}
           >
-            <Label value="Intensity / Absorbance" angle={-90} position="insideLeft" fill="#94a3b8" fontSize={12} style={{textAnchor: 'middle'}} />
+            <Label 
+                value={yAxisMode === 'transmittance' ? "Transmittance (%)" : "Absorbance"} 
+                angle={-90} 
+                position="insideLeft" 
+                fill="#94a3b8" 
+                fontSize={12} 
+                style={{textAnchor: 'middle'}} 
+            />
           </YAxis>
 
           <Tooltip 
-            content={<CustomTooltip isNormalized={isNormalized} viewMode={viewMode} />} 
+            content={<CustomTooltip isNormalized={isNormalized} viewMode={viewMode} yAxisMode={yAxisMode} />} 
             cursor={{ stroke: '#ffffff', strokeWidth: 1, strokeOpacity: 0.2 }}
-            isAnimationActive={false} 
+            isAnimationActive={false}
           />
-          <Legend wrapperStyle={{ paddingTop: '10px' }} iconType="plainline" />
           
           {visibleDatasets.map((dataset) => (
             <Line
               key={dataset.id}
-              xAxisId="primary"
-              type="linear" 
+              type="monotone" 
               dataKey={dataset.id}
               name={dataset.name}
               stroke={dataset.color}
@@ -245,29 +270,37 @@ const SpectralChart: React.FC<SpectralChartProps> = ({
             />
           ))}
 
-          {/* Feature Lines need to map to the correct X value */}
-          {analysisResults?.features.map((feature, idx) => {
-            const xVal = viewMode === 'wavenumber' ? (10000 / feature.wavelength) : feature.wavelength;
-            return (
-                <ReferenceLine
-                xAxisId="primary"
-                key={`ai-${idx}`}
-                x={xVal}
-                stroke="#00ff9d"
-                strokeDasharray="3 3"
-                strokeOpacity={0.5}
-                label={{
-                    position: 'top',
-                    value: feature.species,
-                    fill: '#00ff9d',
-                    fontSize: 10,
-                    opacity: 0.8
-                }}
-                />
-            );
+          {/* Render Real Atomic Lines with Transitions */}
+          {lineDatasets.map(ds => {
+             return ds.data.map((pt, idx) => {
+                 const xVal = getX(pt.wavelength);
+                 
+                 // Hide lines outside of typical view ranges to prevent bunching
+                 if (viewMode === 'wavenumber' && (xVal > 25000 || xVal < 50)) return null;
+                 
+                 return (
+                    <ReferenceLine
+                        key={`${ds.id}-${idx}`}
+                        x={xVal}
+                        stroke={ds.color} 
+                        strokeOpacity={0.7}
+                        strokeWidth={1}
+                        label={{
+                            position: 'insideTop',
+                            value: ds.name, 
+                            fill: ds.color,
+                            fontSize: 9,
+                            angle: -90,
+                            dx: 10,
+                            dy: 40
+                        }}
+                    />
+                 );
+             });
           })}
         </ComposedChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnalysisResult, SpectralDataset, Annotation } from '../types';
-import { BookOpen, Sparkles, StickyNote, Tag } from 'lucide-react';
+import { BookOpen, Sparkles, StickyNote, Tag, ArrowRight } from 'lucide-react';
 
 interface InfoPanelProps {
   analysis: AnalysisResult;
@@ -51,11 +51,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ analysis, datasets, annotations, 
         )}
       </div>
 
-      {/* 2. AI Analysis */}
+      {/* 2. Analysis / Line Data */}
       <div className="flex-1 p-4 border-b md:border-b-0 md:border-r border-space-800 overflow-y-auto">
         <h3 className="text-xs font-bold text-accent-purple uppercase tracking-wider mb-3 flex items-center gap-2 sticky top-0 bg-space-950/0 backdrop-blur-sm py-1">
           <Sparkles size={14} />
-          AI Analysis Report
+          Analysis & Line Data
         </h3>
         {analysis ? (
           <div className="space-y-4">
@@ -65,16 +65,24 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ analysis, datasets, annotations, 
                 <h4 className="text-[10px] font-semibold text-gray-500 mb-2 uppercase">Identified Features</h4>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                   {analysis.features.map((f, i) => (
-                    <div key={i} className="bg-space-900/50 p-2 rounded border border-space-800/50 flex items-start gap-3">
+                    <div key={i} className="bg-space-900/50 p-2 rounded border border-space-800/50 flex items-start gap-3 hover:border-accent-purple/50 transition-colors cursor-default">
                       <div className="mt-0.5">
-                         <Tag size={12} className="text-gray-500" />
+                         <Tag size={12} className={f.type === 'atomic_line' ? "text-accent-purple" : "text-gray-500"} />
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-white text-xs font-bold">{f.species}</span>
-                          <span className="text-accent-green font-mono text-[10px]">{f.wavelength} µm</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 justify-between">
+                          <span className="text-white text-xs font-bold truncate">{f.species}</span>
+                          <span className="text-accent-green font-mono text-[10px] whitespace-nowrap">{f.wavelength.toFixed(4)} µm</span>
                         </div>
-                        <span className="text-gray-400 text-[10px] block leading-tight mt-0.5">{f.description}</span>
+                        {f.transition ? (
+                           <div className="text-gray-400 text-[10px] mt-1 flex items-center gap-1 font-mono">
+                             <span className="truncate" title={f.transition.split('->')[0]}>{f.transition.split('->')[0]}</span>
+                             <ArrowRight size={8} />
+                             <span className="truncate" title={f.transition.split('->')[1]}>{f.transition.split('->')[1]}</span>
+                           </div>
+                        ) : (
+                           <span className="text-gray-400 text-[10px] block leading-tight mt-0.5">{f.description}</span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -84,7 +92,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ analysis, datasets, annotations, 
           </div>
         ) : (
           <div className="text-gray-600 text-xs italic mt-4">
-            Select "Run Comparative Analysis" in the toolbar to generate a report on visible spectra.
+            Select "Analyze" or perform a "Lines" search to view detailed spectral data.
           </div>
         )}
       </div>
