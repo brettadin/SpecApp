@@ -1,0 +1,5 @@
+{
+  "name": "SpectraScope",
+  "description": "A comprehensive tool for retrieving, visualizing, and analyzing atmospheric composition and spectroscopic data of celestial bodies using the Gemini API.",
+  "requestFramePermissions": []
+}
