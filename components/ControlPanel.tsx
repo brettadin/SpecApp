@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
 import { Search, Eye, EyeOff, Trash2, Atom, Activity, Database, Settings2, Download, Server, BrainCircuit, ArrowLeftRight, TrendingDown, ScanBarcode, Box, Filter, Check, Ruler, FlaskConical, CloudFog } from 'lucide-react';
 import { SpectralDataset, ViewMode, YAxisMode } from '../types';
 
@@ -50,6 +51,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     minIntensity: 50
   });
   const [showFilters, setShowFilters] = useState(false);
+  const [storedKey, setStoredKey] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +60,31 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       if (searchMode !== 'lines') setQuery(''); 
     }
   };
+
+  const loadStoredKey = async () => {
+    try {
+      if ((window as any).electronAPI?.store?.get) {
+        const key = await (window as any).electronAPI.store.get('geminiApiKey');
+        if (key) setStoredKey(String(key));
+      }
+    } catch (e) {
+      console.warn('Failed to load stored key', e);
+    }
+  }
+
+  const handleSetKey = async () => {
+    try {
+      const k = window.prompt('Set Gemini API Key (stored locally)');
+      if (k && (window as any).electronAPI?.store?.set) {
+        await (window as any).electronAPI.store.set('geminiApiKey', k);
+        setStoredKey(k);
+      }
+    } catch (e) {
+      console.warn('Failed to set stored key', e);
+    }
+  }
+
+  useEffect(() => { loadStoredKey(); }, []);
 
   const getPlaceholder = () => {
       switch(searchMode) {
@@ -378,6 +405,24 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     ? 'IR Frequency (Reciprocal Centimeters)' 
                     : (viewMode === 'nanometers' ? 'Visible Light / UV Wavelength' : 'Infrared Wavelength')}
                 </p>
+              </div>
+
+              {/* API Key Management */}
+              <div className="bg-space-950 p-3 rounded-lg border border-space-800">
+                <div className="flex items-start justify-between mb-2">
+                  <span className="text-xs text-gray-300 flex items-center gap-2">
+                    <Server size={12} className="text-accent-cyan"/>
+                    API Key
+                  </span>
+                  <div className="text-[10px] text-gray-400">
+                    {storedKey ? 'Stored' : 'Not Set'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleSetKey} className="py-1 px-2 rounded bg-accent-cyan/10 text-accent-cyan text-xs">Set / Update</button>
+                  <button onClick={loadStoredKey} className="py-1 px-2 rounded bg-space-900 text-gray-400 text-xs">Refresh</button>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-2">This key is stored locally using Electron Store when running in the desktop app.</p>
               </div>
 
               {/* Transmittance Toggle */}

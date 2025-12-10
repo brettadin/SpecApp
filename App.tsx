@@ -4,7 +4,7 @@ import ControlPanel from './components/ControlPanel';
 import SpectralChart from './components/SpectralChart';
 import InfoPanel from './components/InfoPanel';
 import MoleculeViewer from './components/MoleculeViewer';
-import { fetchSpectralData, analyzeSpectra } from './services/geminiService';
+import { fetchSpectralData as fetchSpectralDataFromGenAI, analyzeSpectra as analyzeSpectraFromGenAI } from './services/geminiService';
 import { searchNISTDirect, fetchAtomicLines } from './services/nistService';
 import { fetchMolecularStructure } from './services/structureService';
 import { SpectralDataset, AnalysisResult, CHART_COLORS, Annotation, ViewMode, YAxisMode, MolecularStructure, SpectralFeature } from './types';
@@ -27,6 +27,27 @@ const App: React.FC = () => {
   const [activeFeature, setActiveFeature] = useState<SpectralFeature | null>(null);
 
   useEffect(() => {
+    // If we run in Electron with a store, ensure the Gemini API key is set or ask the user to supply it
+    const setupElectronKey = async () => {
+      try {
+        if ((window as any).electronAPI?.store) {
+          const current = await (window as any).electronAPI.store.get('geminiApiKey');
+          if (!current) {
+              const key = window.prompt('Enter Gemini API Key (will be stored locally)');
+            if (key) {
+              await (window as any).electronAPI.store.set('geminiApiKey', key);
+              }
+              else {
+                // If the user cancels, do nothing and let them use the UI later
+              }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check or set electron stored keys', e);
+      }
+    };
+    setupElectronKey();
+
     if (activeDatasetId) {
         const ds = datasets.find(d => d.id === activeDatasetId);
         if (ds && ds.structure) {
@@ -83,7 +104,7 @@ const App: React.FC = () => {
              const searchType = filters?.type || 'IR'; 
              results = await searchNISTDirect(query, searchType); // Returns GeminiResponse[]
           } else {
-             const oneResult = await fetchSpectralData(query);
+             const oneResult = window?.electronAPI?.gemini?.fetchSpectralData ? await window.electronAPI.gemini.fetchSpectralData(query) : await fetchSpectralDataFromGenAI(query);
              results = [oneResult];
           }
           
@@ -155,7 +176,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     const visible = datasets.filter(d => d.isVisible && d.type !== 'Line');
     try {
-      const result = await analyzeSpectra(visible);
+      const result = window?.electronAPI?.gemini?.analyzeSpectra ? await window.electronAPI.gemini.analyzeSpectra(visible) : await analyzeSpectraFromGenAI(visible);
       setAnalysisResult(result);
     } catch (err) {
       console.error(err);

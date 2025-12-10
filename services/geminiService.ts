@@ -7,7 +7,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const DATA_MODEL = "gemini-2.5-flash"; 
 const ANALYSIS_MODEL = "gemini-2.5-flash";
 
-const cleanAndParseJSON = (text: string): any => {
+export const cleanAndParseJSON = (text: string): any => {
   try {
     return JSON.parse(text);
   } catch (e) {
